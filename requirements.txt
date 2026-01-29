@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+psycopg2-binary
+pgvector
+pypdf
+langchain-google-genai
+langchain-text-splitters
+langchain-core
+langgraph
+python-dotenv
+requests
