@@ -60,6 +60,15 @@
         gap: 8px;
         margin-top: 12px;
       }
+      .toolbar {
+        display: flex;
+        justify-content: flex-end;
+        margin-bottom: 8px;
+      }
+      .secondary {
+        background: transparent;
+        color: var(--text);
+      }
       input[type="text"] {
         flex: 1;
         padding: 12px;
@@ -102,6 +111,9 @@
       <div class="status">Docs + Web context on every query</div>
     </header>
     <main>
+      <div class="toolbar">
+        <button class="secondary" id="new-chat" type="button">New Chat</button>
+      </div>
       <section class="chat" id="chat"></section>
       <form id="chat-form">
         <input
@@ -121,6 +133,24 @@
       const form = document.getElementById("chat-form");
       const input = document.getElementById("question");
       const status = document.getElementById("status");
+      const sessionKey = "rag_session_id";
+      let sessionId =
+        localStorage.getItem(sessionKey) ||
+        (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(16).slice(2));
+      localStorage.setItem(sessionKey, sessionId);
+      const newChatButton = document.getElementById("new-chat");
+
+      function startNewChat() {
+        sessionId = crypto.randomUUID
+          ? crypto.randomUUID()
+          : Math.random().toString(16).slice(2);
+        localStorage.setItem(sessionKey, sessionId);
+        chat.innerHTML = "";
+        status.textContent = "";
+        input.focus();
+      }
+
+      newChatButton.addEventListener("click", startNewChat);
 
       function addMessage(role, text, sources) {
         const wrapper = document.createElement("div");
@@ -152,11 +182,15 @@
           const response = await fetch("/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question }),
+            body: JSON.stringify({ question, session_id: sessionId }),
           });
           const data = await response.json();
           if (!response.ok) {
             throw new Error(data.detail || "Request failed");
+          }
+          if (data.session_id && data.session_id !== sessionId) {
+            sessionId = data.session_id;
+            localStorage.setItem(sessionKey, sessionId);
           }
           addMessage("assistant", data.answer, {
             doc: data.doc_sources || [],

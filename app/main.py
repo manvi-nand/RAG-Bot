@@ -1,4 +1,5 @@
 import logging
+import secrets
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -18,16 +19,20 @@ logging.basicConfig(
 
 app = FastAPI(title="macOS Tahoe RAG Bot")
 STATIC_DIR = Path(__file__).parent / "static"
+MAX_TURNS = 6
+SESSIONS: dict[str, list[dict]] = {}
 
 
 class ChatRequest(BaseModel):
     question: str
+    session_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
     doc_sources: list[str]
     web_sources: list[str]
+    session_id: str
 
 class IngestRequest(BaseModel):
     filenames: list[str] | None = None
@@ -55,11 +60,17 @@ def index():
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(payload: ChatRequest):
-    result = answer_question(payload.question)
+    session_id = payload.session_id or secrets.token_hex(8)
+    history = SESSIONS.get(session_id, [])
+    result = answer_question(payload.question, history=history)
+    history.append({"role": "user", "content": payload.question})
+    history.append({"role": "assistant", "content": result["answer"]})
+    SESSIONS[session_id] = history[-MAX_TURNS * 2 :]
     return {
         "answer": result["answer"],
         "doc_sources": result.get("doc_sources", []),
         "web_sources": result.get("web_sources", []),
+        "session_id": session_id,
     }
 
 

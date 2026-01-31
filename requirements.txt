@@ -8,4 +8,4 @@ langchain-text-splitters
 langchain-core
 langgraph
 python-dotenv
-requests
+google-genai

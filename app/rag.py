@@ -2,7 +2,7 @@ import logging
 from typing import List, TypedDict
 
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pgvector import Vector
 
 from .config import settings
@@ -19,14 +19,27 @@ class RAGState(TypedDict):
     doc_sources: List[str]
     web_sources: List[str]
     answer: str
+    history: List[dict]
 
 
-def _retrieve_chunks(question: str) -> List[str]:
+def _build_query(question: str, history: List[dict]) -> str:
+    recent_user_turns = [
+        turn.get("content", "")
+        for turn in history[-6:]
+        if turn.get("role") == "user" and turn.get("content")
+    ]
+    if not recent_user_turns:
+        return question
+    history_text = " | ".join(recent_user_turns)
+    return f"{history_text} | Follow-up: {question}"
+
+
+def _retrieve_chunks(query: str) -> List[str]:
     embeddings = GoogleGenerativeAIEmbeddings(
         model=settings.embedding_model,
         google_api_key=settings.google_api_key,
     )
-    query_vector = Vector(embeddings.embed_query(question))
+    query_vector = Vector(embeddings.embed_query(query))
 
     with get_connection() as conn:
         with conn.cursor() as cur:
@@ -47,17 +60,23 @@ def _retrieve_chunks(question: str) -> List[str]:
     ]
 
 
-def _retrieve_web(question: str) -> List[str]:
+def _retrieve_web(query: str) -> List[str]:
     try:
-        return search_web(question)
+        return search_web(query)
     except Exception:
         return []
 
 
 def retrieve(state: RAGState) -> RAGState:
-    doc_chunks = _retrieve_chunks(state["question"])
-    web_chunks = _retrieve_web(state["question"])
+    history = state.get("history", [])
+    search_query = _build_query(state["question"], history)
+    doc_chunks = _retrieve_chunks(search_query)
+    web_chunks = _retrieve_web(search_query)
 
+    logger.info(
+        "retrieval query: %s",
+        search_query,
+    )
     logger.info(
         "retrieved context: docs=%s web=%s",
         len(doc_chunks),
@@ -80,6 +99,7 @@ def retrieve(state: RAGState) -> RAGState:
         "context": "\n\n".join(combined_parts),
         "doc_sources": doc_chunks,
         "web_sources": web_chunks,
+        "history": state.get("history", []),
         "answer": "",
     }
 
@@ -91,17 +111,22 @@ def generate(state: RAGState) -> RAGState:
         temperature=0.2,
     )
     system_prompt = (
-        "You answer questions about macOS Tahoe (macOS 26) using the provided "
-        "context only. Use both document context plus web context to answer "
-        "the user's query. If the answer is not in the context, say you do not "
-        "have enough information."
+        "You are a friendly, clear assistant for macOS Tahoe (macOS 26). "
+        "Answer directly in a helpful tone, using short paragraphs or bullet "
+        "points when listing items. If you do not have enough information, "
+        "say so briefly and suggest what details would help."
     )
-    messages = [
-        SystemMessage(content=system_prompt),
+    messages = [SystemMessage(content=system_prompt)]
+    for turn in state.get("history", []):
+        if turn.get("role") == "user":
+            messages.append(HumanMessage(content=turn.get("content", "")))
+        elif turn.get("role") == "assistant":
+            messages.append(AIMessage(content=turn.get("content", "")))
+    messages.append(
         HumanMessage(
             content=f"Question: {state['question']}\n\nContext:\n{state['context']}"
-        ),
-    ]
+        )
+    )
     response = model.invoke(messages)
     return {
         "question": state["question"],
@@ -114,7 +139,7 @@ def generate(state: RAGState) -> RAGState:
     }
 
 
-def answer_question(question: str) -> RAGState:
-    state = {"question": question}
+def answer_question(question: str, history: List[dict] | None = None) -> RAGState:
+    state = {"question": question, "history": history or []}
     state = retrieve(state)  # type: ignore[assignment]
     return generate(state)  # type: ignore[return-value]

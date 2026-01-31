@@ -17,12 +17,12 @@ class Settings:
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "models/embedding-001")
+    grounding_model: str = os.getenv("GROUNDING_MODEL", "gemini-3-flash-preview")
 
     chunk_size: int = int(os.getenv("CHUNK_SIZE", "1000"))
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "150"))
     top_k: int = int(os.getenv("TOP_K", "5"))
 
-    tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
     web_top_k: int = int(os.getenv("WEB_TOP_K", "3"))
 
 
