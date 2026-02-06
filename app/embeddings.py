@@ -27,6 +27,7 @@ def embed_texts(texts: List[str]) -> List[List[float]]:
     embeddings = GoogleGenerativeAIEmbeddings(
         model=settings.embedding_model,
         google_api_key=settings.google_api_key,
+        transport="rest"
     )
     return embeddings.embed_documents(texts)
 
@@ -60,6 +61,14 @@ def is_source_ingested(source: str) -> bool:
             return cur.fetchone() is not None
 
 
+def delete_documents_by_source(source: str) -> None:
+    """Remove all chunks for a given source (e.g. to re-ingest)."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM documents WHERE source = %s", (source,))
+        conn.commit()
+
+
 def ingest_pdf(path: Path, skip_if_exists: bool = True) -> bool:
     if skip_if_exists and is_source_ingested(path.name):
         return False
@@ -70,7 +79,11 @@ def ingest_pdf(path: Path, skip_if_exists: bool = True) -> bool:
     return True
 
 
-def ingest_folder(folder: Path, filenames: List[str] | None = None) -> Tuple[List[str], List[str]]:
+def ingest_folder(
+    folder: Path,
+    filenames: List[str] | None = None,
+    force: bool = False,
+) -> Tuple[List[str], List[str]]:
     processed: List[str] = []
     skipped: List[str] = []
     pdf_paths = sorted(folder.glob("*.pdf"))
@@ -78,7 +91,9 @@ def ingest_folder(folder: Path, filenames: List[str] | None = None) -> Tuple[Lis
         filename_set = {name.strip() for name in filenames if name.strip()}
         pdf_paths = [path for path in pdf_paths if path.name in filename_set]
     for pdf_path in pdf_paths:
-        did_ingest = ingest_pdf(pdf_path, skip_if_exists=True)
+        if force:
+            delete_documents_by_source(pdf_path.name)
+        did_ingest = ingest_pdf(pdf_path, skip_if_exists=not force)
         if did_ingest:
             processed.append(pdf_path.name)
         else:
